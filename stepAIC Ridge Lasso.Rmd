@@ -1,0 +1,378 @@
+---
+title: "stepAIC Ridge Lasso"
+author: "Joel Hillner"
+date: "10/12/2017"
+output: word_document
+---
+###stepAIC
+```{r}
+#This is reading back in the data and not changing cars$mpg to a 0/1 variable
+library(MASS)
+cars2<-read.csv("Auto.csv",   sep=",", header=TRUE,na.strings = "?")
+cars2 <- na.omit(cars2)
+str(cars2)
+set.seed(1775)
+cars2.samp <- sample(1:nrow(cars2),nrow(cars2)/2)
+cars2.train=cars2[cars2.samp,]
+cars2.test=cars2[-cars2.samp,]
+step.lm <- stepAIC(lm(mpg~.,data=cars2[,-9]), trace = F)
+step.lm$anova
+names(step.lm)
+R2.stepAIC <- summary(step.lm)$r.sq
+R2.stepAIC
+stepMSE <- mean((cars2$mpg-predict(step.lm, cars2))[-cars2.samp]^2)#MSE for stepAIC
+stepMSE
+
+#Cross Validation
+mycv.stepAIC<-
+  function (data, glmfit, K=10, seed=123) {
+    #lmfit is lm fit with whole data
+    #this function is to get the Cross-validated mean square error for regression
+    #output R2 and MSE
+    library(MASS)
+    n <- nrow(data)
+    set.seed(seed) #K=10
+    
+    #partition the data into K subsets
+    f <- ceiling(n/K)
+    s <- sample(rep(1:K, f), n)  
+    
+    #generate indices 1:10 and sample n of them  
+    # K fold cross-validated mean squared error
+    
+    CV=NULL; Rcv=NULL
+    
+    for (i in 1:K) { #i=1
+      test.index <- seq_len(n)[(s == i)] #test data
+      train.index <- seq_len(n)[(s != i)] #training data
+      
+      #model with training data
+      glm.fit <- glm(glmfit$call, data = data[train.index,])
+      glm.fit1 <- stepAIC(glm.fit, trace = F)
+      #observed test set y
+      glm.y <- glmfit$y[test.index]
+      #predicted y for test data
+      pred.y <- predict(glm.fit1, newdata=data[test.index,])
+      #observed - predicted on test data
+      error= glm.y - pred.y
+      #mean squred error
+      MSE <- mean(error^2)
+      CV=c(CV,MSE)
+      R=1-sum(error^2)/sum((glm.y-mean(glm.y))^2)
+      Rcv=c(Rcv,R)
+    }
+    
+    #Output
+    list(call = glmfit$call, K = K, 
+         MSE = mean(CV),R2=mean(Rcv), 
+         seed = seed)  
+    
+  }
+#make sure to take out the 'names' variables with the cars[,-9]
+mycv.stepAIC(cars2[,-9],glm(mpg~.,data=cars2[,-9]))
+
+########stepAIC with logistic regression########
+cars2.log<-read.csv("Auto.csv",   sep=",", header=TRUE,na.strings = "?")
+cars2.log <- na.omit(cars2.log)
+#Create a binary variable, mpg01, that contains a “high” if mpg contains
+cars2.log$mpg01<- ifelse(cars2.log$mpg>median(cars2.log$mpg),1,0)
+cars2.log$mpg01 <- factor(cars2.log$mpg01, labels=c("Low","High"))
+#Removing the original mpg variable and the name variable
+cars2.log <- data.frame(cars2.log)[,-c(1,9)]
+#Cross Validation
+
+mycv.stepAIC.logistic<-
+  function (data, glmfit, K=10, seed=123) {
+    #logistic regression
+    #this function is to get the Cross-validated mean square error for regression
+    #output R2 and MSE
+    library(MASS)
+    n <- nrow(data)
+    set.seed(seed) #K=10
+    
+    #partition the data into K subsets
+    f <- ceiling(n/K)
+    s <- sample(rep(1:K, f), n)  
+    
+    #generate indices 1:10 and sample n of them  
+    # K fold cross-validated mean squared error
+    
+    CV=NULL; O.P=NULL
+    
+    for (i in 1:K) { #i=1
+      test.index <- seq_len(n)[(s == i)] #test data
+      train.index <- seq_len(n)[(s != i)] #training data
+      
+      #model with training data
+      glm.fit <- glm(glmfit$call, data = data[train.index,], family=binomial)
+      glm.fit1 <- stepAIC(glm.fit, trace = F)
+      #observed test set y
+      test.y <- glmfit$y[test.index]
+      
+      #predicted probability for test data
+      pred.y <- predict(glm.fit1, newdata=data[test.index,],type="response")
+      
+      #change prediction probability to class prediction
+      tname=names(table(glmfit$y))
+      ypred=ifelse(pred.y>.5,tname[2],tname[1])
+      
+      #
+      error=mean(ypred!=test.y) #classification error 
+      ovsp <- cbind(pred=ypred,obs=test.y) #pred vs obs vector
+      
+      
+      CV <- c(CV,error) 
+      O.P <- rbind(O.P,ovsp)
+    }
+    
+    #Output
+    list(call = glmfit$call, K = K, 
+         Error = mean(CV), ConfusianMatrix=table(O.P[,1],O.P[,2]), 
+         seed = seed)  
+    
+  }
+mycv.stepAIC.logistic(cars2.log,glm (mpg01 ~ ., data = cars2.log, family = binomial))
+```
+### Ridge Regression
+```{r}
+library(glmnet)
+cars2.ridge<-read.csv("Auto.csv",   sep=",", header=TRUE,na.strings = "?")
+cars2.ridge <- na.omit(cars2.ridge)
+# attach(cars)
+# summary(cars)
+cars3 <- cars2.ridge[,-c(8,9,10)]
+x=model.matrix(mpg~.,cars3)[,-1]
+y=cars3$mpg
+dim(cars3)
+
+grid=10^seq(10,-2,length=100)
+ridge.mod=glmnet(x,y,alpha=0,lambda=grid)
+
+names(ridge.mod)
+dim(coef(ridge.mod))
+ridge.mod$lambda[50]
+coef(ridge.mod)[,50]
+sqrt(sum(coef(ridge.mod)[-1,50]^2))
+ridge.mod$lambda[60]
+coef(ridge.mod)[,60]
+sqrt(sum(coef(ridge.mod)[-1,60]^2))
+
+predict(ridge.mod,s=50,type="coefficients")[1:7,]#the 7 is from the dim(cars3)
+
+#Which lambda, how do we choose?
+set.seed(1775)
+train=sample(1:nrow(x), nrow(x)/2)
+test=(-train)
+y.test=y[test]
+
+ridge.mod=glmnet(x[train,],y[train],alpha=0,lambda=grid, thresh=1e-12)
+ridge.pred=predict(ridge.mod,s=4,newx=x[test,])
+ridgeMSE <- mean((ridge.pred-y.test)^2)#MSE
+#Cross Validation for lambda 
+set.seed(1775) #Because it is partitioning randomly
+cv.out=cv.glmnet(x[train,],y[train],alpha=0)
+plot(cv.out)
+
+#best lambda
+bestlam=cv.out$lambda.min
+bestlam
+
+#Gives you the smallest prediction error (cross validated)
+#using bestlam, applied to test set
+ridge.pred=predict(ridge.mod,s=bestlam,newx=x[test,])
+ridgeMSE.cv <- mean((ridge.pred-y.test)^2);ridgeMSE.cv#MSE
+R2.ridge=1-sum((ridge.pred-y.test)^2)/sum((y.test-mean(y.test))^2);R2.ridge
+out=glmnet(x,y,alpha=0)
+#print out ridge regression coefficients
+predict(out,type="coefficients",s=bestlam)[1:7,]
+```
+###Lasso
+```{r}
+# The Lasso
+lasso.mod=glmnet(x[train,],y[train],alpha=1,lambda=grid)#notice a=1, not 0 like ridge
+plot(lasso.mod)
+
+#how to choose best lambda
+set.seed(1775)
+cv.out.lasso=cv.glmnet(x[train,],y[train],alpha=1)
+plot(cv.out.lasso)
+bestlam.lasso=cv.out.lasso$lambda.min
+
+lasso.pred=predict(lasso.mod,s=bestlam.lasso,newx=x[test,])
+lassoMSE.cv <- mean((lasso.pred-y.test)^2);lassoMSE.cv#MSE
+R2.lasso=1-sum((lasso.pred-y.test)^2)/sum((y.test-mean(y.test))^2);R2.lasso
+
+#model selection from the lasso 
+out=glmnet(x,y,alpha=1,lambda=grid)
+lasso.coef=predict(out,type="coefficients",s=bestlam)[1:7,]
+lasso.coef
+lasso.coef[lasso.coef!=0]
+
+#Cross Validation
+
+mycv.lasso<-
+  function (data, model=perf~., yname="perf", K=10, seed=123) {
+    #Lasso model for regression 
+    #this function is to get the Cross-validated mean square error for regression
+    #output R2 and MSE
+    require(class)
+    library(glmnet)
+    n <- nrow(data)
+    set.seed(seed) #K=10
+    datay=data[,yname] #response variable
+    x=model.matrix(model,data)[,-1] #model matrix
+    
+    #partition the data into K subsets
+    f <- ceiling(n/K)
+    s <- sample(rep(1:K, f), n)  
+    
+    #generate indices 1:10 and sample n of them  
+    # K fold cross-validated mean squared error
+    
+    CV=NULL; Rcv=NULL
+    grid=10^seq(10,-2,length=100)
+    
+    for (i in 1:K) { #i=1
+      test.index <- seq_len(n)[(s == i)] #test data
+      train.index <- seq_len(n)[(s != i)] #training data
+      
+      #model with training data
+      #Find best lambda from cv
+      cv.out=cv.glmnet(x[train.index,],datay[train.index],alpha=1,
+                       lambda=grid)
+      bestlam=cv.out$lambda.min
+      #using best lambda run lasso model
+      #and get the prediction
+      lasso.mod=glmnet(x[train.index,],datay[train.index],alpha=1,
+                       lambda=grid)
+      lasso.pred=predict(lasso.mod, s=bestlam, newx=x[test.index,])
+      
+      
+      error=(lasso.pred-datay[test.index])
+      MSE=mean(error^2)
+      CV=c(CV,MSE)
+      R=1-sum(error^2)/sum((datay[test.index]-mean(datay[test.index]))^2)
+      Rcv=c(Rcv,R)
+    }
+    
+    #Output
+    list(call = model, K = K, 
+         MSE = mean(CV),R2=mean(Rcv), 
+         seed = seed)  
+    
+  }
+mycv.lasso(cars3,model = mpg~.,yname="mpg",K=10,seed=1775)
+
+#Lasso logistic
+cars2.lasso.log<-read.csv("Auto.csv",   sep=",", header=TRUE,na.strings = "?")
+cars2.lasso.log <- na.omit(cars2.lasso.log)
+#Create a binary variable, mpg01, that contains a “high” if mpg contains
+cars2.lasso.log$mpg01<- ifelse(cars2.lasso.log$mpg>median(cars2.lasso.log$mpg),1,0)
+cars2.lasso.log$mpg01 <- factor(cars2.lasso.log$mpg01, labels=c("Low","High"))
+#Removing the original mpg variable and the name variable
+cars2.lasso.log <- data.frame(cars2.lasso.log)[,-c(1,9)]
+
+mycv.lasso.logistic<-
+  function (data, model=perf~., yname="perf", K=10, seed=123) {
+    #Lasso model for logistic regression 
+    #this function is to get the Cross-validated error for logistic regression
+    #output error and confusion matrix
+    require(class)
+    library(glmnet)
+    n <- nrow(data)
+    set.seed(seed) #K=10
+    datay=(data[,yname]) #response variable
+    x=model.matrix(model,data)[,-1] #model matrix
+    tn=names(table(datay))
+    #partition the data into K subsets
+    f <- ceiling(n/K)
+    s <- sample(rep(1:K, f), n)  
+    
+    #generate indices 1:10 and sample n of them  
+    # K fold cross-validated mean squared error
+    
+    CV=NULL
+    grid=10^seq(10,-2,length=100)
+    
+    for (i in 1:K) { #i=1
+      test.index <- seq_len(n)[(s == i)] #test data
+      train.index <- seq_len(n)[(s != i)] #training data
+      
+      #model with training data
+      #Find best lambda from cv
+      cv.out=cv.glmnet(x[train.index,],datay[train.index],alpha=1,
+                       lambda=grid,family="binomial")
+      bestlam=cv.out$lambda.min
+      #using best lambda run lasso model
+      #and get the prediction
+      
+      lasso.pred=predict(cv.out, s=bestlam, newx=x[test.index,],type="class")
+      lasso.pred=ifelse(lasso.pred=="1",tn[1],tn[2])
+      error=mean(lasso.pred!=datay[test.index])
+      CV=c(CV,error)
+      
+    }
+    
+    #Output
+    list(call = model, K = K, 
+         error = mean(CV), 
+         seed = seed)  
+    
+  }
+mycv.lasso.logistic(cars2.lasso.log,glm(mpg01 ~ ., data = cars2.lasso.log, family = binomial),yname="mpg01")
+```
+### PCR
+```{r}
+# Principal Components Regression
+#install.packages("pls")
+library(pls)
+set.seed(1775)
+cars.pcr<-read.csv("Auto.csv",   sep=",", header=TRUE,na.strings = "?")
+cars.pcr <- na.omit(cars.pcr)
+cars.pcr <- data.frame(cars.pcr)[,-c(7,8,9)]
+summary(cars.pcr)
+pcr.fit=pcr(mpg~., data=cars.pcr,scale=TRUE,validation="CV")
+summary(pcr.fit)
+validationplot(pcr.fit,val.type="MSEP")
+?pcr
+set.seed(123)
+train=sample(c(TRUE,FALSE), nrow(cars.pcr),rep=TRUE)
+test=(!train)
+summary(cars.pcr)
+pcr.fit=pcr(mpg~., data=cars.pcr, subset=train,scale=TRUE, 
+            validation="CV")
+names(pcr.fit)
+pcr.fit$validation$adj
+pcr.fit$validation$PRESS
+
+which(pcr.fit$validation$PRESS==
+min(pcr.fit$validation$PRESS))
+which(pcr.fit$validation$adj==
+        min(pcr.fit$validation$adj))#This is where I get the 5 for the ncomp=5 for the pcr.pred few rows down
+
+class(summary(pcr.fit))
+summary(pcr.fit)$VALIDATION
+validationplot(pcr.fit,val.type="MSEP")
+y.test=cars.pcr$mpg[test]
+
+pcr.pred=predict(pcr.fit,cars.pcr[test,],ncomp=5)
+
+1-mean((pcr.pred-y.test)^2)/var(y.test)#R-squared
+mean((pcr.pred-y.test)^2)#MSE
+1-sum((pcr.pred-y.test)^2)/sum((y.test-mean(y.test))^2)
+
+1-sum((y.test[!is.na(y.test)]-pcr.pred[!is.na(y.test)])^2)/sum((y.test[!is.na(y.test)]-mean(y.test[!is.na(y.test)]))^2)
+
+#PLSR
+set.seed(1)
+pls.fit = plsr(mpg~., data=cars.pcr, subset=train, scale=TRUE, validation="CV")
+summary(pls.fit)
+validationplot(pls.fit, val.type="MSEP")
+pls.pred = predict(pls.fit, cars.pcr[test,], ncomp=2)
+mean((pls.pred-y.test)^2)
+R2=1-sum((pls.pred-y.test)^2)/sum((y.test-mean(y.test))^2)
+R2
+pls.fit = plsr(mpg~., data=cars.pcr, scale=TRUE, ncomp=2)
+summary(pls.fit)
+```
+
