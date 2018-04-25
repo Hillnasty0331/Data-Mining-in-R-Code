@@ -1,0 +1,249 @@
+---
+title: "Linear and Logistic"
+author: "Joel Hillner"
+date: "10/12/2017"
+output: word_document
+---
+###Linear Regression
+```{r}
+getwd()
+setwd("/Users/joelhillner/Desktop/Advanced Statistical LearningData Mining/Home Works")
+cars<-read.csv("Auto.csv",   sep=",", header=TRUE, na.strings = "?")
+cars <- na.omit(cars)
+summary(lm.fit <- lm(mpg~horsepower, data = cars))
+#two measures of model accuracy:RSE and R^2
+#RSE: Residual (y-yhat) standard error 
+rse=summary(lm.fit)$sigma#RSE
+rsq=summary(lm.fit)$r.sq#R2
+rsq;rse
+rse/mean(cars$mpg) # noise/signal=.21 
+#percentage error wrt mean is roughly 21 %.
+
+# What is the predicted mpg associated with a horsepower of 98? 
+# What are the associated 95% confidence and predictionintervals? 
+predict(lm.fit, data.frame(horsepower=98))
+predict(lm.fit, data.frame(horsepower=98), interval ="confidence")
+predict(lm.fit, data.frame(horsepower=98), interval = "prediction")
+#Use the plot() function to produce diagnostic plots of the leastsquares regression fit.
+par(mfrow=c(2,2))
+plot(lm.fit)
+# Compute the matrix of correlations between the variables using
+# the function cor(). You will need to exclude the name variable,
+# which is qualitative.
+cor(cars[,-9])
+str(cars)
+
+# Bootstrap 95% CI for R-Squared
+library(boot)
+# function to obtain R-Squared from the data
+rsq <- function(formula, data, indices) {
+  d <- data[indices,] # allows boot to select sample
+  fit <- lm(formula, data=d)
+  return(summary(fit)$r.square)
+}
+# bootstrapping with 1000 replications
+results <- boot(data=cars, statistic=rsq,
+                R=1000, formula=mpg~horsepower)
+# view results
+results
+# get 95% confidence interval
+boot.ci(results, type="bca")
+
+######Estimation of Beta#####
+# Now we need the function we would like to estimate
+# In our case the beta:
+betfun = function(data,b,formula){  
+# b is the random indexes for the bootstrap sample
+	d = data[b,] 
+	return(lm(d[,1]~d[,2], data = d)$coef[2])  
+# thats for the beta coefficient
+	}
+# now you can bootstrap:
+bootbet = boot(data=cars, statistic=betfun, R=5000) 
+# R is how many bootstrap samples
+names(bootbet)
+plot(bootbet)
+hist(bootbet$t, breaks = 100)
+boot.ci(bootbet, type="bca")
+
+
+# Leave-One-Out Cross-Validation
+
+glm.fit=glm(mpg~horsepower,data=cars)
+coef(glm.fit)
+
+#cv.glm function in boot library
+
+library(boot)
+cv.err=cv.glm(cars, glm.fit)
+# delta
+# The first component is the raw cross-validation estimate of prediction error.
+# The second component is the adjusted cross-validation estimate.
+cv.err$delta[1] #cross-validated error #delete-one 
+?cv.glm#This function can be used to implement k-fold CV
+
+cv.error=rep(NA,5)
+for (i in 1:5){
+ glm.fit=glm(mpg~poly(horsepower,i),data=cars)
+ cv.error[i]=cv.glm(cars,glm.fit)$delta[1]
+ }
+cv.error
+
+# k-Fold Cross-Validation for glm
+set.seed(127)
+cv.error.10=rep(0,10)
+for (i in 1:10){ #poly(x,degree = 1)
+ glm.fit=glm(mpg~poly(horsepower,i), data=cars)
+ cv.error.10[i]=cv.glm(cars,glm.fit,K=10)$delta[1]
+ }
+cv.error.10
+
+#Multiple Regression
+# origin of car (1. American, 2. European, 3. Japanese)
+country <- c('American', 'European', 'Japanese')
+cars$origin <- factor(cars$origin, labels = country)
+summary(lm.fit_multiple <- lm(mpg~.,data=cars[,-9]))
+#With interaction terms
+summary(lm.fit_multi.inter <- lm(mpg~.^2,data=cars[,-9]))
+names(lm.fit_multi.inter)
+#Cross validation
+
+mycv.glm<-function (data, glmfit, K=10, seed=123) {
+    #glmfit is glm fit with whole data
+    #this function is to get the Cross-validated mean square error for regression
+    #output R2 and MSE
+    n <- nrow(data)
+    set.seed(seed) #K=10
+    
+    #partition the data into K subsets
+    f <- ceiling(n/K)
+    s <- sample(rep(1:K, f), n)  
+    #generate indices 1:10 and sample n of them  
+    # K fold cross-validated mean squared error
+    
+    CV=NULL; Rcv=NULL
+    
+    for (i in 1:K) { #i=1
+      test.index <- seq_len(n)[(s == i)] #test data
+      train.index <- seq_len(n)[(s != i)] #training data
+      
+      #model with training data
+      glm.fit=glm(glmfit$call, data=data[train.index,])
+      
+      #observed test set y
+      glm.y <- glmfit$y[test.index]
+      #observed - predicted on test data
+      error= glm.y - predict(glm.fit, newdata=data[test.index,])
+      #mean squred error
+      MSE <- mean(error^2)
+      CV=c(CV,MSE)
+      R=1-sum(error^2)/sum((glm.y-mean(glm.y))^2)
+      Rcv=c(Rcv,R)
+    }
+    
+    #Output
+    list(call = glmfit$call, K = K, 
+         MSE = mean(CV),R2=mean(Rcv), 
+         seed = seed)  
+    
+}
+mycv.glm(cars[,-9],glm(mpg~.,data=cars[,-9]))
+
+#Find the prediction R^2 using cv.glm for auto data with regression model “mpg ~ .”
+set.seed(123)
+library(boot)
+glm.fit=glm(mpg~.,data=cars[,-9])
+cv.error2= cv.glm(cars[,-9], glm.fit,K=10)$delta[1]
+cv.error2 #MSE for each model
+1-cv.error2/var(cars$mpg) #R^2
+```
+###logistic regression
+```{r}
+#Reading in the data to create a new cars dataset
+cars.log<-read.csv("Auto.csv",   sep=",", header=TRUE,na.strings = "?")
+cars.log <- na.omit(cars.log)
+#Create a binary variable, mpg01, that contains a “high” if mpg contains
+cars.log$mpg01<- ifelse(cars.log$mpg>median(cars.log$mpg),1,0)
+cars.log$mpg01 <- factor(cars.log$mpg01, labels=c("Low","High"))
+#Removing the original mpg variable and the name variable
+cars_bi <- data.frame(cars.log)[,-c(1,9)]
+#Split the data into a training set (70%) and a test set (30%).
+set.seed(123)
+d=dim(cars_bi)
+n=d[1]
+tid <- sample(1:n, 0.7*n,rep=F)
+cars_bi.train <- cars_bi[tid,]
+cars_bi.test <- cars_bi[-tid,]
+
+model.train1 <- glm (mpg01 ~ ., data = cars_bi.train, family = binomial)
+summary(model.train1)
+testing_y <-  cars_bi$mpg01[-tid]
+logistic_probs1 <- predict(model.train1, newdata= cars_bi.test, type="response")
+# Since predict(...,type="response") computes probablities, 
+# then we have to convert them to the actual classes (high or low)
+#Without type="response" option, prediction produces logit(probability) not probability.
+contrasts(cars_bi$mpg01)
+logistic_pred_y1 = rep("Low", length(testing_y))
+logistic_pred_y1[logistic_probs1 > 0.5 ] = "High"
+table(logistic_pred_y1, testing_y)
+mean(logistic_pred_y1 != testing_y)#missclassification error rate
+#Cross validation
+# logistic regression CV function
+CV.logistic<- function (data, glmfit, yname, K, seed=321) {
+    n <- nrow(data)
+    set.seed(seed)
+    datay=data[,yname] #response variable
+    library(MASS)
+    #partition the data into K subsets
+    f <- ceiling(n/K)
+    s <- sample(rep(1:K, f), n)  
+    #generate indices 1:10 and sample n of them  
+    # K fold cross-validated error
+    CV=NULL
+    for (i in 1:K) { #i=1
+      j.out <- seq_len(n)[(s == i)] #test data
+      j.in <- seq_len(n)[(s != i)] #training data
+      #model with training data
+      log.fit=glm(glmfit$call, data=data[j.in,],family = 'binomial')
+      #observed test set y
+      testy <- datay[j.out]
+      #predicted test set y
+      log.predy=predict(log.fit, data[j.out,],type='response')
+      tname=rownames(contrasts(datay))
+      class = rep(tname[1], nrow(data[j.out,]))
+      class[log.predy > 0.5] = tname[2]
+      #observed - predicted on test data
+      error= mean(testy!=class)
+      #error rates 
+      CV=c(CV,mean(error))
+    }
+    
+    #Output
+    list(call = glmfit$call, K = K, error=mean(CV),
+         log_error_rate = paste(100*mean(CV), "%"), seed = seed)  
+    
+}
+#Bootstrap Method
+set.seed(1775)
+boot.fn <- function(input_data,index_data) { 
+  return(coef(glm(mpg01 ~ .,data = input_data, family = binomial, subset=index_data)))
+}
+er.log <- CV.logistic(cars_bi,glm(mpg01 ~ ., data = cars_bi, family = binomial),yname="mpg01",K=10)
+er.log$error
+library(boot)
+boot.fn(input_data=cars_bi,index_data=1:nrow(cars_bi))
+#Use the boot() function together with your boot.fn() function to estimate 
+#the standard errors of the logistic regression coefficients
+uraboot <- boot(cars_bi,boot.fn,1000)
+names(uraboot)
+uraboot
+apply(uraboot$t,2,sd)[3]
+# apply tuturorial
+# 
+#     X is an array or a matrix if the dimension of the array is 2;
+#     MARGIN is a variable defining how the function is applied: when MARGIN=1, it applies over rows, whereas with MARGIN=2, 
+#     it works over columns. Note that when you use the construct MARGIN=c(1,2), it applies to both rows and columns; and
+#     FUN, which is the function that you want to apply to the data. It can be any R function, including a User Defined Function (UDF).
+
+```
+
