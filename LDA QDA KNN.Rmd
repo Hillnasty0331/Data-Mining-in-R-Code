@@ -1,0 +1,181 @@
+---
+title: "LDA QDA KNN"
+author: "Joel Hillner"
+date: "10/12/2017"
+output: word_document
+---
+###LDA
+```{r}
+cars.lda<-read.csv("Auto.csv",   sep=",", header=TRUE,na.strings = "?")
+cars.lda <- na.omit(cars.lda)
+#Create a binary variable, mpg01, that contains a “high” if mpg contains
+cars.lda$mpg01<- ifelse(cars.lda$mpg>median(cars.lda$mpg),1,0)
+cars.lda$mpg01 <- factor(cars.lda$mpg01, labels=c("Low","High"))
+#Removing the original mpg variable and the name variable
+cars.lda <- data.frame(cars.lda)[,-c(1,9)]
+#Split the data into a training set (70%) and a test set (30%).
+set.seed(123)
+d=dim(cars.lda)
+n=d[1]
+tid <- sample(1:n, 0.7*n,rep=F)
+cars.lda.train <- cars.lda[tid,]
+cars.lda.test <- cars.lda[-tid,]
+testing_y.lda <-  cars.lda$mpg01[-tid]
+#To run LDA in R, we will be using the lda() function which is part of a package called MASS.
+library(MASS)
+lda_model<- lda(mpg01 ~ ., data = cars.lda.train)
+#Next, we will assess the model, so again we will use predict() fuction on our testing data set.
+lda_pred <- predict(lda_model, cars.lda.test)
+names(lda_pred)
+lda_pred_y <- lda_pred$class
+# The good news is that when using an LDA model in the predict() fuction, the output is the 
+# categories themselves(classes), unlike what happened when we used logistic regression model 
+# (the output was probabilities). Let's assess the model. We create the confusion matrix and 
+# compute the misclassification error.
+
+## compute the confusion matrix
+table(lda_pred_y, testing_y.lda)
+## compute the misclassification error rate
+mean(lda_pred_y != testing_y.lda)
+
+#CV LDA
+myLDAkcv <- function(data,ldafit,yname,k=10,seed=1775){
+  library(MASS)#Lodaing the package MASS which LDA and QDA functions reside
+  n <- nrow(data)
+  set.seed(seed)
+  datay=data[,yname]#This is my reponse variable
+  #partition the data into K subsets
+  f <- ceiling(n/k)
+  s <- sample(rep(1L:k, f), n) 
+  CV= NULL
+      for (i in 1:k) { #i=1
+      din <- seq_len(n)[(s != i)] #Training data  
+      dout <- seq_len(n)[(s == i)] #test data
+      #model with training data
+      lda.fit <- lda(ldafit, data=data[din,])
+      #observed test set y
+      lda.y <- datay[dout]
+      #predict test set y
+      lda.predy <- predict(lda.fit,data[dout,])$class
+      #observed-predicted on test data
+      error=mean(lda.y !=lda.predy)
+      #mean squred error
+      CV <- c(CV,mean(error))
+      }
+      list(call = ldafit, k = k,error=mean(CV), lda_error_rate=paste(100*mean(CV),"% LDA error rate"), seed=seed)
+              
+}
+cv.error.lda <-myLDAkcv(cars.lda,ldafit=mpg01 ~ .,yname ="mpg01")
+cv.error.lda$lda_error_rate
+```
+###QDA
+```{r}
+# Quadratic Discriminant Analysis
+# Training and assessing a QDA model is very similar in syntax to training and 
+# assessing a QDA model. The only difference is in the function name lda().
+qda_model <-  qda(mpg01 ~ ., data = cars.lda.train)
+qda_pred <- predict(qda_model, cars.lda.test)
+qda_pred_y <- qda_pred$class
+table(qda_pred_y, testing_y.lda)
+mean(qda_pred_y != testing_y.lda)
+#Cross Validation for QDA
+myQDAkcv <- function(data,qdafit,yname,k=10,seed=1775){
+  library(MASS)#Lodaing the package MASS which LDA and QDA functions reside
+  n <- nrow(data)
+  set.seed(seed)
+  datay=data[,yname]#This is my reponse variable
+  #partition the data into K subsets
+  f <- ceiling(n/k)
+  s <- sample(rep(1L:k, f), n) 
+  CV= NULL
+      for (i in 1:k) { #i=1
+      din <- seq_len(n)[(s != i)] #Training data  
+      dout <- seq_len(n)[(s == i)] #test data
+      #model with training data
+      qda.fit <- qda(qdafit, data=data[din,])
+      #observed test set y
+      qda.y <- datay[dout]
+      #predict test set y
+      qda.predy <- predict(qda.fit,data[dout,])$class
+      #observed-predicted on test data
+      error=mean(qda.y !=qda.predy)
+      #mean squred error
+      CV <- c(CV,mean(error))
+      }
+      list(call = qdafit, k = k,error=mean(CV), qda_error_rate=paste(100*mean(CV),"% QDA error rate"), seed=seed)
+}
+cv.error.qda <- myQDAkcv(data=cars.lda, qdafit=mpg01 ~ ., yname="mpg01", k=10, seed=123)
+cv.error.qda$qda_error_rate
+```
+##KNN for Classification
+
+To train a KNN model for classification, we will be using the function knn(), which is part of the class R package. Make sure to install and load this library.
+```{r}
+##load the class R package.
+library(class)
+```
+The splitting of data here will be different from what we did for logistic regression, LDA, and QDA. This is because the knn() fuction is built to take different arguements compared to glm(), lda(), and qda().
+For knn(), we have to have our y variable in a seperate column from the training and testing data. In addition to this issue, we have to scale or standerdize our numerical variables because the KNN method classifies observations using distance measures. 
+To standardize the dataset, we can use the function scale() as follows:
+```{r}
+cars.knn<-read.csv("Auto.csv",   sep=",", header=TRUE,na.strings = "?")
+cars.knn <- na.omit(cars.knn)
+#Create a binary variable, mpg01, that contains a “high” if mpg contains
+cars.knn$mpg01<- ifelse(cars.knn$mpg>median(cars.knn$mpg),1,0)
+cars.knn$mpg01 <- factor(cars.knn$mpg01, labels=c("Low","High"))
+#Removing the original mpg variable and the name variable
+cars.knn <- data.frame(cars.knn)[,-c(1,9)]
+# we got rid of mpg01 because it is our response variable. Make sure ## to exclude all categorical variables.  
+#We can't scale categorical variables!
+library(FNN)
+data=cars.knn[,-c(6,7,8)]
+data=scale(data)
+training_data = data[tid, ]
+testing_data = data[-tid,]
+training_yknn <-  cars.knn$mpg01[tid]
+testing_yknn <-  cars.knn$mpg01[-tid]
+set.seed(1)
+knn_pred_y = knn(training_data, testing_data, training_yknn, k = 1)
+table(knn_pred_y, testing_yknn)
+mean(knn_pred_y != testing_yknn)
+#Build R function for K-fold Cross-Validated error for KNN
+myKNNkcv <- function(x_data,y_data,KN=1,k.cv=10,seed=1775) {
+  library(class)#Lodaing the package 'class' which KNN function resides
+  x_data=scale(x_data)
+  n <- nrow(x_data)
+  set.seed(seed)
+  #partition the data into K subsets
+  f <- ceiling(n/k.cv)
+  s <- sample(rep(1L:k.cv, f), n) 
+   CV= NULL
+      for (i in 1:k.cv) { #i=1
+      din <- seq_len(n)[(s != i)] #Training data  
+      dout <- seq_len(n)[(s == i)] #test data
+      train.x <- x_data[din,]
+      test.x <- x_data[dout,]
+      train.y <- y_data[din]
+      test.y <- y_data[dout]
+      knn_pred_y <-  knn(train.x, test.x, train.y, k = KN)
+      #observed-predicted on test data
+      error=mean(knn_pred_y !=test.y)
+      #mean squred error
+      CV <- c(CV,mean(error))
+      }
+      list(k.cv = k.cv,error=mean(CV), knn_error_rate=paste(100*mean(CV),"% KNN error rate"), seed=seed)
+} 
+#Find the best k for knn using 10 fold-CV
+knn_pred_y1 = NULL
+for(i in 1:20){
+set.seed(1)
+knn_pred_y1[i] = myKNNkcv(x_data=cars.knn[,-c(6,7,8)], y_data=cars.knn$mpg01, KN=i, k.cv = 10)$knn_error_rate
+}
+
+#find the minimum error rate
+min_error_rate = min(knn_pred_y1)
+print(min_error_rate)
+
+#get the index of that error rate, which is the k
+K = which(knn_pred_y1 == min_error_rate)
+print(K)
+```
+
